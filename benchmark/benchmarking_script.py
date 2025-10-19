@@ -29,35 +29,52 @@ def benchmark_model(description: str, num_warmup_iters: int, num_iters: int, fun
 def benchmark_backward_only(description: str, num_warmup_iters: int, num_iters: int, model, input_data) -> tuple[float, float]:
         # Warmup iterations
         for i in range(num_warmup_iters):
-            with nvtx.range(f"Warmup {description} {i} - Complete"):
-                # Execute forward pass first
-                output = model(input_data)
-                loss = output.sum()
+            # Execute forward pass first (not included in timing)
+            output = model(input_data)
+            loss = output.sum()
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            
+            # Start NVTX range right before backward kernels launch
+            with nvtx.range(f"Warmup {description} {i}"):
                 if torch.cuda.is_available():
+                    # Use CUDA event to mark the exact start of backward kernels
+                    start_event = torch.cuda.Event(enable_timing=True)
+                    start_event.record()
+                
+                loss.backward()
+                
+                if torch.cuda.is_available():
+                    # Record end event and ensure kernels complete within NVTX range
+                    end_event = torch.cuda.Event(enable_timing=True)
+                    end_event.record()
                     torch.cuda.synchronize()
-                # Mark backward pass within the complete range
-                with nvtx.range(f"Warmup {description} {i} - Backward Only"):
-                    loss.backward()
-                    if torch.cuda.is_available():
-                        torch.cuda.synchronize()
         
         times: list[float] = []
         for i in range(num_iters):
-            with nvtx.range(f"Iteration {description} {i} - Complete"):
-                # Execute forward pass first (not included in CPU timing)
-                output = model(input_data)
-                loss = output.sum()
+            # Execute forward pass first (not included in timing)
+            output = model(input_data)
+            loss = output.sum()
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            
+            # Only measure backward pass time with precise GPU kernel association
+            start_time = timeit.default_timer()
+            with nvtx.range(f"Iteration {description} {i}"):
                 if torch.cuda.is_available():
-                    torch.cuda.synchronize()
+                    # Use CUDA event to mark the exact start of backward kernels
+                    start_event = torch.cuda.Event(enable_timing=True)
+                    start_event.record()
                 
-                # Only measure backward pass CPU time, but mark GPU operations
-                start_time = timeit.default_timer()
-                with nvtx.range(f"Iteration {description} {i} - Backward Only"):
-                    loss.backward()
-                    if torch.cuda.is_available():
-                        torch.cuda.synchronize()
-                end_time = timeit.default_timer()
-                times.append(end_time - start_time)
+                loss.backward()
+                
+                if torch.cuda.is_available():
+                    # Record end event and ensure kernels complete within NVTX range
+                    end_event = torch.cuda.Event(enable_timing=True)
+                    end_event.record()
+                    torch.cuda.synchronize()
+            end_time = timeit.default_timer()
+            times.append(end_time - start_time)
         
         mean_time: float = sum(times) / len(times)
         std_dev: float = math.sqrt(sum((time - mean_time) ** 2 for time in times) / len(times))
