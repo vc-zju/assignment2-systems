@@ -26,6 +26,35 @@ def benchmark_model(description: str, num_warmup_iters: int, num_iters: int, fun
         std_dev: float = math.sqrt(sum((time - mean_time) ** 2 for time in times) / len(times))
         print(f"{description} took {mean_time:.6f} seconds per iteration ± {std_dev:.6f} seconds")
 
+def benchmark_backward_only(description: str, num_warmup_iters: int, num_iters: int, model, input_data) -> tuple[float, float]:
+        for i in range(num_warmup_iters):
+            # Execute forward pass first (not included in timing)
+            output = model(input_data)
+            loss = output.sum()
+            # Only benchmark the backward pass
+            with nvtx.range(f"Warmup {description} {i}"):
+                loss.backward()
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+        
+        times: list[float] = []
+        for i in range(num_iters):
+            # Execute forward pass first (not included in timing)
+            output = model(input_data)
+            loss = output.sum()
+            # Only measure backward pass time
+            start_time = timeit.default_timer()
+            with nvtx.range(f"Iteration {description} {i}"):
+                loss.backward()
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+            end_time = timeit.default_timer()
+            times.append(end_time - start_time)
+        
+        mean_time: float = sum(times) / len(times)
+        std_dev: float = math.sqrt(sum((time - mean_time) ** 2 for time in times) / len(times))
+        print(f"{description} took {mean_time:.6f} seconds per iteration ± {std_dev:.6f} seconds")
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--description", type=str, default="Benchmarking model")
@@ -58,8 +87,8 @@ def main():
     if torch.cuda.is_available():
         input_data = input_data.to(torch.cuda.current_device())
     benchmark_model("Forward pass", args.num_warmup_iters, args.num_iters, model, input_data)
-    loss = model(input_data).sum()
-    benchmark_model("Backward pass", args.num_warmup_iters, args.num_iters, lambda : loss.backward(retain_graph=True))
+    
+    benchmark_backward_only("Backward pass", args.num_warmup_iters, args.num_iters, model, input_data)
 
 if __name__ == "__main__":
     main()
