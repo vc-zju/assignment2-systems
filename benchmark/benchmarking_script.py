@@ -15,9 +15,9 @@ def benchmark_model(description: str, num_warmup_iters: int, num_iters: int, fun
             torch.cuda.synchronize()
         times: list[float] = []
         for i in range(num_iters):
-            with nvtx.range(f"Iteration {description} {i}"):
                 start_time = timeit.default_timer()
-                function(*args, **kwargs)
+                with nvtx.range(f"Iteration {description} {i}"):
+                    function(*args, **kwargs)
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
                 end_time = timeit.default_timer()
