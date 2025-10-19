@@ -3,25 +3,28 @@ import math
 import cs336_basics.model
 import timeit
 import torch
+import torch.cuda.nvtx as nvtx
 
 from typing import Callable
 
 def benchmark_model(description: str, num_warmup_iters: int, num_iters: int, function: Callable, *args, **kwargs) -> tuple[float, float]:
-    for _ in range(num_warmup_iters):
-        function(*args, **kwargs)
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-    times: list[float] = []
-    for _ in range(num_iters):
-        start_time = timeit.default_timer()
-        function(*args, **kwargs)
+    with nvtx.range(f"Warmup {description}"):
+        for _ in range(num_warmup_iters):
+            function(*args, **kwargs)
         if torch.cuda.is_available():
             torch.cuda.synchronize()
-        end_time = timeit.default_timer()
-        times.append(end_time - start_time)
-    mean_time: float = sum(times) / len(times)
-    std_dev: float = math.sqrt(sum((time - mean_time) ** 2 for time in times) / len(times))
-    print(f"{description} took {mean_time:.6f} seconds per iteration ± {std_dev:.6f} seconds")
+    with nvtx.range(f"Iterations {description}"):
+        times: list[float] = []
+        for _ in range(num_iters):
+            start_time = timeit.default_timer()
+            function(*args, **kwargs)
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            end_time = timeit.default_timer()
+            times.append(end_time - start_time)
+        mean_time: float = sum(times) / len(times)
+        std_dev: float = math.sqrt(sum((time - mean_time) ** 2 for time in times) / len(times))
+        print(f"{description} took {mean_time:.6f} seconds per iteration ± {std_dev:.6f} seconds")
     return mean_time, std_dev
 
 def parse_args() -> argparse.Namespace:
