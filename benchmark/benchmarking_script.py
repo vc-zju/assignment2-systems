@@ -11,17 +11,17 @@ def benchmark_model(description: str, num_warmup_iters: int, num_iters: int, fun
         for i in range(num_warmup_iters):
             with nvtx.range(f"Warmup {description} {i}"):
                 function(*args, **kwargs)
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        times: list[float] = []
-        for i in range(num_iters):
-                start_time = timeit.default_timer()
-                with nvtx.range(f"Iteration {description} {i}"):
-                    function(*args, **kwargs)
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
-                end_time = timeit.default_timer()
-                times.append(end_time - start_time)
+        times: list[float] = []
+        for i in range(num_iters):
+            start_time = timeit.default_timer()
+            with nvtx.range(f"Iteration {description} {i}"):
+                function(*args, **kwargs)
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+            end_time = timeit.default_timer()
+            times.append(end_time - start_time)
         mean_time: float = sum(times) / len(times)
         std_dev: float = math.sqrt(sum((time - mean_time) ** 2 for time in times) / len(times))
         print(f"{description} took {mean_time:.6f} seconds per iteration ± {std_dev:.6f} seconds")
