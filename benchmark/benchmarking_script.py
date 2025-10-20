@@ -36,7 +36,7 @@ def benchmark_train_step(description: str, num_warmup_iters: int, num_iters: int
                 loss = output.sum()
                 optimizer.zero_grad()
                 loss.backward()
-                lr = cs336_basics.optimizer.get_consine_lr(i, 1e-2, 1e-3, 1000, 5000)
+                lr = cs336_basics.optimizer.get_cosine_lr(i, 1e-2, 1e-3, 1000, 5000)
                 for param_group in optimizer.param_groups:
                     param_group["lr"] = lr
                 optimizer.step()
@@ -46,16 +46,17 @@ def benchmark_train_step(description: str, num_warmup_iters: int, num_iters: int
             # Execute forward pass first (not included in timing)
                 output = model(input_data)
                 loss = output.sum()
-            
-            with nvtx.range(f"{description} formal iter {i} backward"):         
-                optimizer.zero_grad()  
-                loss.backward()          
+
+            with nvtx.range(f"{description} formal iter {i} backward"):
+                optimizer.zero_grad()
+                loss.backward()
 
             with nvtx.range(f"{description} formal iter {i} optimizer"):
+                lr = cs336_basics.optimizer.get_cosine_lr(i, 1e-2, 1e-3, 1000, 5000)
                 for param_group in optimizer.param_groups:
                     param_group["lr"] = lr
                 optimizer.step()
-    
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
