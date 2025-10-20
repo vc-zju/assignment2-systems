@@ -1,6 +1,7 @@
 import argparse
 import math
 import cs336_basics.model
+import cs336_basics.optimizer
 import timeit
 import torch
 import torch.cuda.nvtx as nvtx
@@ -26,59 +27,35 @@ def benchmark_model(description: str, num_warmup_iters: int, num_iters: int, fun
         std_dev: float = math.sqrt(sum((time - mean_time) ** 2 for time in times) / len(times))
         print(f"{description} took {mean_time:.6f} seconds per iteration ± {std_dev:.6f} seconds")
 
-def benchmark_backward_only(description: str, num_warmup_iters: int, num_iters: int, model, input_data) -> tuple[float, float]:
+def benchmark_train_step(description: str, num_warmup_iters: int, num_iters: int, model, input_data, optimizer):
         # Warmup iterations
-        for i in range(num_warmup_iters):
-            # Execute forward pass first (not included in timing)
-            output = model(input_data)
-            loss = output.sum()
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-            
-            # Start NVTX range right before backward kernels launch
-            with nvtx.range(f"Warmup {description} {i}"):
-                if torch.cuda.is_available():
-                    # Use CUDA event to mark the exact start of backward kernels
-                    start_event = torch.cuda.Event(enable_timing=True)
-                    start_event.record()
-                
+        for i in range(1, num_warmup_iters + 1):
+            with nvtx.range(f"{description} warmup iter {i}"):
+                # Execute forward pass first (not included in timing)
+                output = model(input_data)
+                loss = output.sum()
+                optimizer.zero_grad()
                 loss.backward()
-                
-                if torch.cuda.is_available():
-                    # Record end event and ensure kernels complete within NVTX range
-                    end_event = torch.cuda.Event(enable_timing=True)
-                    end_event.record()
-                    torch.cuda.synchronize()
-        
-        times: list[float] = []
-        for i in range(num_iters):
+                lr = cs336_basics.optimizer.get_consine_lr(i, 1e-2, 1e-3, 1000, 5000)
+                for param_group in optimizer.param_groups:
+                    param_group["lr"] = lr
+                optimizer.step()
+        # Formal Iteration
+        for i in range(1, num_iters + 1):
+            with nvtx.range(f"{description} formal iter {i} forward"):
             # Execute forward pass first (not included in timing)
-            output = model(input_data)
-            loss = output.sum()
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
+                output = model(input_data)
+                loss = output.sum()
             
-            # Only measure backward pass time with precise GPU kernel association
-            start_time = timeit.default_timer()
-            with nvtx.range(f"Iteration {description} {i}"):
-                if torch.cuda.is_available():
-                    # Use CUDA event to mark the exact start of backward kernels
-                    start_event = torch.cuda.Event(enable_timing=True)
-                    start_event.record()
-                
-                loss.backward()
-                
-                if torch.cuda.is_available():
-                    # Record end event and ensure kernels complete within NVTX range
-                    end_event = torch.cuda.Event(enable_timing=True)
-                    end_event.record()
-                    torch.cuda.synchronize()
-            end_time = timeit.default_timer()
-            times.append(end_time - start_time)
-        
-        mean_time: float = sum(times) / len(times)
-        std_dev: float = math.sqrt(sum((time - mean_time) ** 2 for time in times) / len(times))
-        print(f"{description} took {mean_time:.6f} seconds per iteration ± {std_dev:.6f} seconds")
+            with nvtx.range(f"{description} formal iter {i} backward"):         
+                optimizer.zero_grad()  
+                loss.backward()          
+
+            with nvtx.range(f"{description} formal iter {i} optimizer"):
+                for param_group in optimizer.param_groups:
+                    param_group["lr"] = lr
+                optimizer.step()
+    
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -111,9 +88,8 @@ def main():
     input_data: torch.Tensor = torch.randint(0, args.vocab_size, (args.batch_size, args.context_length))
     if torch.cuda.is_available():
         input_data = input_data.to(torch.cuda.current_device())
-    benchmark_model("Forward pass", args.num_warmup_iters, args.num_iters, model, input_data)
-    
-    benchmark_backward_only("Backward pass", args.num_warmup_iters, args.num_iters, model, input_data)
+    optimizer: cs336_basics.optimizer.AdamW = cs336_basics.optimizer.AdamW(model.parameters())
+    benchmark_train_step(args.description, args.num_warmup_iters, args.num_iters, model, input_data, optimizer)
 
 if __name__ == "__main__":
     main()
