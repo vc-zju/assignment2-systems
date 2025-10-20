@@ -164,7 +164,7 @@ def main():
     if torch.cuda.is_available():
         input_data = input_data.to(torch.cuda.current_device())
     # optimizer: cs336_basics.optimizer.AdamW = cs336_basics.optimizer.AdamW(model.parameters())
-    context_manager: torch.autocast(device_type="cuda") if args.use_mixed_precision else nullcontext()
+    context_manager = torch.autocast(device_type="cuda") if args.use_mixed_precision else nullcontext()
     benchmark_forward_and_backward(args.description, args.num_warmup_iters, args.num_iters, model, input_data, context_manager)
 
 if __name__ == "__main__":
