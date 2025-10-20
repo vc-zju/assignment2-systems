@@ -5,7 +5,7 @@ import cs336_basics.optimizer
 import timeit
 import torch
 import torch.cuda.nvtx as nvtx
-
+from contextlib import nullcontext
 from jaxtyping import Float, Bool
 from einops import einsum
 from torch import Tensor
@@ -62,6 +62,33 @@ def benchmark_train_step(description: str, num_warmup_iters: int, num_iters: int
                     param_group["lr"] = lr
                 optimizer.step()
 
+def benchmark_forward_and_backward(description: str, num_warmup_iters: int, num_iters: int, model, input_data, context_manager):
+        # Warmup iterations
+        for i in range(1, num_warmup_iters + 1):
+            with context_manager:
+                output = model(input_data)
+                loss = output.sum()
+                loss.backward()
+        # Formal Iteration
+        times: list[float] = []
+        for i in range(1, num_iters + 1):
+            with context_manager:
+                start_time = timeit.default_timer()
+                output = model(input_data)
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                end_time = timeit.default_timer()
+                times.append(end_time - start_time)
+                loss = output.sum()
+                loss.backward()
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                end_time = timeit.default_timer()
+                times.append(end_time - start_time)
+        mean_time: float = sum(times) / len(times)
+        std_dev: float = math.sqrt(sum((time - mean_time) ** 2 for time in times) / len(times))
+        print(f"{description} took {mean_time:.6f} seconds per iteration ± {std_dev:.6f} seconds")
+
 @nvtx.range("scaled_dot_product_attention")
 def annotated_scaled_dot_product_attention(
     Q: Float[Tensor, " ... queries d_k"],
@@ -116,6 +143,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--num-warmup-iters", type=int, default=1)
     parser.add_argument("--num-iters", type=int, default=3)
+    parser.add_argument("--use-mixed-precision", action="store_true")
     return parser.parse_args()
 
 def main():
@@ -135,8 +163,9 @@ def main():
     input_data: torch.Tensor = torch.randint(0, args.vocab_size, (args.batch_size, args.context_length))
     if torch.cuda.is_available():
         input_data = input_data.to(torch.cuda.current_device())
-    optimizer: cs336_basics.optimizer.AdamW = cs336_basics.optimizer.AdamW(model.parameters())
-    benchmark_train_step(args.description, args.num_warmup_iters, args.num_iters, model, input_data, optimizer)
+    # optimizer: cs336_basics.optimizer.AdamW = cs336_basics.optimizer.AdamW(model.parameters())
+    context_manager: torch.autocast(device_type="cuda") if args.use_mixed_precision else nullcontext()
+    benchmark_forward_and_backward(args.description, args.num_warmup_iters, args.num_iters, model, input_data, context_manager)
 
 if __name__ == "__main__":
     main()
