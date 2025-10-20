@@ -70,7 +70,8 @@ def benchmark_forward_and_backward(description: str, num_warmup_iters: int, num_
                 loss = output.sum()
                 loss.backward()
         # Formal Iteration
-        times: list[float] = []
+        forward_times: list[float] = []
+        backward_times: list[float] = []
         for i in range(1, num_iters + 1):
             with context_manager:
                 start_time = timeit.default_timer()
@@ -78,16 +79,18 @@ def benchmark_forward_and_backward(description: str, num_warmup_iters: int, num_
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
                 end_time = timeit.default_timer()
-                times.append(end_time - start_time)
+                forward_times.append(end_time - start_time)
                 loss = output.sum()
                 loss.backward()
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
                 end_time = timeit.default_timer()
-                times.append(end_time - start_time)
-        mean_time: float = sum(times) / len(times)
-        std_dev: float = math.sqrt(sum((time - mean_time) ** 2 for time in times) / len(times))
-        print(f"{description} took {mean_time:.6f} seconds per iteration ± {std_dev:.6f} seconds")
+                backward_times.append(end_time - start_time)
+        mean_forward_time: float = sum(forward_times) / len(forward_times)
+        std_dev_forward: float = math.sqrt(sum((time - mean_forward_time) ** 2 for time in forward_times) / len(forward_times))
+        mean_backward_time: float = sum(backward_times) / len(backward_times)
+        std_dev_backward: float = math.sqrt(sum((time - mean_backward_time) ** 2 for time in backward_times) / len(backward_times))
+        print(f"{description} took {mean_forward_time:.6f} seconds per iteration ± {std_dev_forward:.6f} seconds for forward pass and {mean_backward_time:.6f} seconds per iteration ± {std_dev_backward:.6f} seconds for backward pass")
 
 @nvtx.range("scaled_dot_product_attention")
 def annotated_scaled_dot_product_attention(
