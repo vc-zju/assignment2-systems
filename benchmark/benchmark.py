@@ -12,7 +12,7 @@ model_descriptions = {
         "rope_theta": 10000.0,
         "context_length": 512,
         "batch_size": 4,
-        "num_warmup_iters": 0,
+        "num_warmup_iters": 5,
         "num_iters": 10,
     },
     "medium": {
@@ -24,7 +24,7 @@ model_descriptions = {
         "rope_theta": 10000.0,
         "context_length": 512,
         "batch_size": 4,
-        "num_warmup_iters": 0,
+        "num_warmup_iters": 5,
         "num_iters": 10,
     },
     "large": {
@@ -36,7 +36,7 @@ model_descriptions = {
         "rope_theta": 10000.0,
         "context_length": 512,
         "batch_size": 4,
-        "num_warmup_iters": 0,
+        "num_warmup_iters": 5,
         "num_iters": 10,
     },
     "xl": {
@@ -48,7 +48,7 @@ model_descriptions = {
         "rope_theta": 10000.0,
         "context_length": 512,
         "batch_size": 4,
-        "num_warmup_iters": 0,
+        "num_warmup_iters": 5,
         "num_iters": 10,
     },
     "2.7B": {
@@ -60,7 +60,7 @@ model_descriptions = {
         "rope_theta": 10000.0,
         "context_length": 512,
         "batch_size": 4,
-        "num_warmup_iters": 0,
+        "num_warmup_iters": 5,
         "num_iters": 10,
     }
 }
@@ -69,7 +69,10 @@ def main():
     current_dir = os.path.dirname(os.path.abspath(__file__))
     benchmarking_script_path = os.path.join(current_dir, benchmarking_script)
     for description, model_description in model_descriptions.items():
-        command = f"uv run python {benchmarking_script_path} --description {description} --vocab-size {model_description['vocab_size']} --d-model {model_description['d_model']} --num-layers {model_description['num_layers']} --num-heads {model_description['num_heads']} --d-ff {model_description['d_ff']} --rope-theta {model_description['rope_theta']} --context-length {model_description['context_length']} --batch-size {model_description['batch_size']} --num-warmup-iters {model_description['num_warmup_iters']} --num-iters {model_description['num_iters']}"
+        command = f"uv run python {benchmarking_script_path} --description no_mixed_precision_{description} --vocab-size {model_description['vocab_size']} --d-model {model_description['d_model']} --num-layers {model_description['num_layers']} --num-heads {model_description['num_heads']} --d-ff {model_description['d_ff']} --rope-theta {model_description['rope_theta']} --context-length {model_description['context_length']} --batch-size {model_description['batch_size']} --num-warmup-iters {model_description['num_warmup_iters']} --num-iters {model_description['num_iters']}"
+        print(command)
+        os.system(command)
+        command = f"uv run python {benchmarking_script_path} --description mixed_precision_{description} --vocab-size {model_description['vocab_size']} --d-model {model_description['d_model']} --num-layers {model_description['num_layers']} --num-heads {model_description['num_heads']} --d-ff {model_description['d_ff']} --rope-theta {model_description['rope_theta']} --context-length {model_description['context_length']} --batch-size {model_description['batch_size']} --num-warmup-iters {model_description['num_warmup_iters']} --num-iters {model_description['num_iters']} --use-mixed-precision"
         print(command)
         os.system(command)
 
