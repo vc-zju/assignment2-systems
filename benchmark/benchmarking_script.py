@@ -74,18 +74,19 @@ def benchmark_forward_and_backward(description: str, num_warmup_iters: int, num_
         backward_times: list[float] = []
         for i in range(1, num_iters + 1):
             with context_manager:
-                start_time = timeit.default_timer()
+                forward_start_time = timeit.default_timer()
                 output = model(input_data)
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
-                end_time = timeit.default_timer()
-                forward_times.append(end_time - start_time)
+                forward_end_time = timeit.default_timer()
+                forward_times.append(forward_end_time - forward_start_time)
                 loss = output.sum()
+                backward_start_time = timeit.default_timer()
                 loss.backward()
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
-                end_time = timeit.default_timer()
-                backward_times.append(end_time - start_time)
+                backward_end_time = timeit.default_timer()
+                backward_times.append(backward_end_time - backward_start_time)
         mean_forward_time: float = sum(forward_times) / len(forward_times)
         std_dev_forward: float = math.sqrt(sum((time - mean_forward_time) ** 2 for time in forward_times) / len(forward_times))
         mean_backward_time: float = sum(backward_times) / len(backward_times)
