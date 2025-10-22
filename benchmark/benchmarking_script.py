@@ -90,6 +90,7 @@ def benchmark_train_step(description: str, num_warmup_iters: int, num_iters: int
                 forward_times.append(forward_end_time - forward_start_time)
                 loss = output.sum()
                 backward_start_time = timeit.default_timer()
+                optimizer.zero_grad()
                 loss.backward()
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
