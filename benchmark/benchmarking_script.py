@@ -195,14 +195,14 @@ def main():
         torch.cuda.memory._record_memory_history(max_entries=1000000)
     benchmark_model(args.description, args.num_warmup_iters, args.num_iters, context_manager, model, input_data)
     if args.profile_memory:
-        torch.cuda.memory._dump_snapshot("forward_pass.pickle")
+        torch.cuda.memory._dump_snapshot(f"{args.description}_forward_pass.pickle")
         torch.cuda.memory._record_memory_history(enabled=None)
     
     if args.profile_memory:
         torch.cuda.memory._record_memory_history(max_entries=1000000)
     benchmark_train_step(args.description, args.num_warmup_iters, args.num_iters, model, input_data, optimizer, context_manager)
     if args.profile_memory:
-        torch.cuda.memory._dump_snapshot("train_step.pickle")
+        torch.cuda.memory._dump_snapshot(f"{args.description}_train_step.pickle")
         torch.cuda.memory._record_memory_history(enabled=None)
 
 if __name__ == "__main__":
