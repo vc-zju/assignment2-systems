@@ -80,6 +80,10 @@ def main():
         command = f"uv run python {benchmarking_script_path} --description {description} --vocab-size {model_descriptions['2.7B']['vocab_size']} --d-model {model_descriptions['2.7B']['d_model']} --num-layers {model_descriptions['2.7B']['num_layers']} --num-heads {model_descriptions['2.7B']['num_heads']} --d-ff {model_descriptions['2.7B']['d_ff']} --rope-theta {model_descriptions['2.7B']['rope_theta']} --context-length {context_length} --batch-size {model_descriptions['2.7B']['batch_size']} --num-warmup-iters {model_descriptions['2.7B']['num_warmup_iters']} --num-iters {model_descriptions['2.7B']['num_iters']} --profile-memory"
         print(command)
         os.system(command)
+        description: str = f"2.7B_context_length_{context_length}_use_mixed_precision"
+        command = f"uv run python {benchmarking_script_path} --description {description} --vocab-size {model_descriptions['2.7B']['vocab_size']} --d-model {model_descriptions['2.7B']['d_model']} --num-layers {model_descriptions['2.7B']['num_layers']} --num-heads {model_descriptions['2.7B']['num_heads']} --d-ff {model_descriptions['2.7B']['d_ff']} --rope-theta {model_descriptions['2.7B']['rope_theta']} --context-length {context_length} --batch-size {model_descriptions['2.7B']['batch_size']} --num-warmup-iters {model_descriptions['2.7B']['num_warmup_iters']} --num-iters {model_descriptions['2.7B']['num_iters']} --use-mixed-precision --profile-memory"
+        print(command)
+        os.system(command)
 
 if __name__ == "__main__":
     main()
