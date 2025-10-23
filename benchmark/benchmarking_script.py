@@ -13,7 +13,7 @@ from cs336_basics.nn_utils import softmax
 
 from typing import Callable
 
-def benchmark_model(description: str, num_warmup_iters: int, num_iters: int, context_manager, function: Callable, *args, **kwargs) -> tuple[float, float]:
+def benchmark_model(description: str, num_warmup_iters: int, num_iters: int, context_manager, profile_memory: bool, function: Callable, *args, **kwargs) -> tuple[float, float]:
         for i in range(num_warmup_iters):
             with nvtx.range(f"Warmup {description} {i}"):
                 with context_manager:
@@ -21,6 +21,8 @@ def benchmark_model(description: str, num_warmup_iters: int, num_iters: int, con
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
         times: list[float] = []
+        if profile_memory:
+            torch.cuda.memory._record_memory_history(max_entries=1000000)
         for i in range(num_iters):
             start_time = timeit.default_timer()
             with nvtx.range(f"Iteration {description} {i}"):
@@ -30,6 +32,9 @@ def benchmark_model(description: str, num_warmup_iters: int, num_iters: int, con
                     torch.cuda.synchronize()
             end_time = timeit.default_timer()
             times.append(end_time - start_time)
+        if profile_memory:
+            torch.cuda.memory._dump_snapshot(f"{description}.pickle")
+            torch.cuda.memory._record_memory_history(enabled=None)
         mean_time: float = sum(times) / len(times)
         std_dev: float = math.sqrt(sum((time - mean_time) ** 2 for time in times) / len(times))
         print(f"{description} took {mean_time:.6f} seconds per iteration ± {std_dev:.6f} seconds")
@@ -64,7 +69,7 @@ def benchmark_train_step_nvtx(description: str, num_warmup_iters: int, num_iters
                     param_group["lr"] = lr
                 optimizer.step()
 
-def benchmark_train_step(description: str, num_warmup_iters: int, num_iters: int, model, input_data, optimizer, context_manager):
+def benchmark_train_step(description: str, num_warmup_iters: int, num_iters: int, model, input_data, optimizer, context_manager, profile_memory: bool):
         # Warmup iterations
         for i in range(1, num_warmup_iters + 1):
             with context_manager:
@@ -80,6 +85,8 @@ def benchmark_train_step(description: str, num_warmup_iters: int, num_iters: int
         forward_times: list[float] = []
         backward_times: list[float] = []
         optimizer_times: list[float] = []
+        if profile_memory:
+            torch.cuda.memory._record_memory_history(max_entries=1000000)
         for i in range(1, num_iters + 1):
             with context_manager:
                 forward_start_time = timeit.default_timer()
@@ -105,6 +112,9 @@ def benchmark_train_step(description: str, num_warmup_iters: int, num_iters: int
                     torch.cuda.synchronize()
                 optimizer_end_time = timeit.default_timer()
                 optimizer_times.append(optimizer_end_time - optimizer_start_time)
+        if profile_memory:
+            torch.cuda.memory._dump_snapshot(f"{description}_train_step.pickle")
+            torch.cuda.memory._record_memory_history(enabled=None)
         mean_forward_time: float = sum(forward_times) / len(forward_times)
         std_dev_forward: float = math.sqrt(sum((time - mean_forward_time) ** 2 for time in forward_times) / len(forward_times))
         mean_backward_time: float = sum(backward_times) / len(backward_times)
@@ -192,19 +202,9 @@ def main():
         input_data = input_data.to(torch.cuda.current_device())
     optimizer: cs336_basics.optimizer.AdamW = cs336_basics.optimizer.AdamW(model.parameters())
     context_manager = torch.autocast(device_type="cuda") if args.use_mixed_precision else nullcontext()
-    if args.profile_memory:
-        torch.cuda.memory._record_memory_history(max_entries=1000000)
-    benchmark_model(args.description, args.num_warmup_iters, args.num_iters, context_manager, model, input_data)
-    if args.profile_memory:
-        torch.cuda.memory._dump_snapshot(f"{args.description}_forward_pass.pickle")
-        torch.cuda.memory._record_memory_history(enabled=None)
-    
-    if args.profile_memory:
-        torch.cuda.memory._record_memory_history(max_entries=1000000)
-    benchmark_train_step(args.description, args.num_warmup_iters, args.num_iters, model, input_data, optimizer, context_manager)
-    if args.profile_memory:
-        torch.cuda.memory._dump_snapshot(f"{args.description}_train_step.pickle")
-        torch.cuda.memory._record_memory_history(enabled=None)
+    benchmark_model(f"{args.description}_forward_pass", args.num_warmup_iters, args.num_iters, context_manager, args.profile_memory, model, input_data)
+    benchmark_train_step(args.description, args.num_warmup_iters, args.num_iters, model, input_data, optimizer, context_manager, args.profile_memory)
+
 
 if __name__ == "__main__":
     main()
