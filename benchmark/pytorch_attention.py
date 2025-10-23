@@ -39,11 +39,11 @@ def scaled_dot_product_attention(
     return output
 
 
-def benchmark_attention_forward(Q: Tensor, K: Tensor, V: Tensor, num_warmup: int = 10, num_iters: int = 100) -> float:
+def benchmark_attention_forward(attention_fn, Q: Tensor, K: Tensor, V: Tensor, num_warmup: int = 10, num_iters: int = 100) -> float:
     """Benchmark forward pass of attention."""
     # Warmup iterations
     for _ in range(num_warmup):
-        _ = scaled_dot_product_attention(Q, K, V)
+        _ = attention_fn(Q, K, V)
         if torch.cuda.is_available():
             torch.cuda.synchronize()
     
@@ -51,7 +51,7 @@ def benchmark_attention_forward(Q: Tensor, K: Tensor, V: Tensor, num_warmup: int
     times = []
     for _ in range(num_iters):
         start_time = timeit.default_timer()
-        output = scaled_dot_product_attention(Q, K, V)
+        output = attention_fn(Q, K, V)
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         end_time = timeit.default_timer()
@@ -61,7 +61,7 @@ def benchmark_attention_forward(Q: Tensor, K: Tensor, V: Tensor, num_warmup: int
     return sum(times) / len(times)
 
 
-def benchmark_attention_backward(Q: Tensor, K: Tensor, V: Tensor, num_warmup: int = 10, num_iters: int = 100) -> Tuple[float, float]:
+def benchmark_attention_backward(attention_fn, Q: Tensor, K: Tensor, V: Tensor, num_warmup: int = 10, num_iters: int = 100) -> Tuple[float, float]:
     """Benchmark backward pass of attention and measure memory usage."""
     # Ensure tensors require gradients
     Q_grad = Q.clone().requires_grad_(True)
@@ -70,7 +70,7 @@ def benchmark_attention_backward(Q: Tensor, K: Tensor, V: Tensor, num_warmup: in
     
     # Warmup iterations
     for _ in range(num_warmup):
-        output = scaled_dot_product_attention(Q_grad, K_grad, V_grad)
+        output = attention_fn(Q_grad, K_grad, V_grad)
         loss = output.sum()
         loss.backward()
         # Clear gradients
@@ -86,7 +86,7 @@ def benchmark_attention_backward(Q: Tensor, K: Tensor, V: Tensor, num_warmup: in
         torch.cuda.reset_peak_memory_stats()
     
     # Run one forward pass to measure memory before backward
-    output = scaled_dot_product_attention(Q_grad, K_grad, V_grad)
+    output = attention_fn(Q_grad, K_grad, V_grad)
     loss = output.sum()
     
     if torch.cuda.is_available():
@@ -98,7 +98,7 @@ def benchmark_attention_backward(Q: Tensor, K: Tensor, V: Tensor, num_warmup: in
     times = []
     for _ in range(num_iters):
         # Forward pass (not timed)
-        output = scaled_dot_product_attention(Q_grad, K_grad, V_grad)
+        output = attention_fn(Q_grad, K_grad, V_grad)
         loss = output.sum()
         
         # Timed backward pass
@@ -127,7 +127,7 @@ def create_random_inputs(batch_size: int, seq_len: int, d_model: int, device: st
 
 
 def main():
-    """Main benchmarking function."""
+    """Main benchmarking function comparing compiled vs uncompiled attention."""
     # Fixed parameters
     batch_size = 8
     d_model_options = [16, 32, 64, 128]
@@ -139,14 +139,17 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
     
+    # Create compiled version of attention function
+    compiled_attention = torch.compile(scaled_dot_product_attention)
+    
     # Results storage
     results = []
     
-    print(f"Benchmarking attention with batch_size={batch_size}")
+    print(f"Benchmarking attention (compiled vs uncompiled) with batch_size={batch_size}")
     print(f"d_model options: {d_model_options}")
     print(f"seq_len options: {seq_len_options}")
     print(f"Warmup iterations: {num_warmup}, Timed iterations: {num_iters}")
-    print("-" * 80)
+    print("=" * 100)
     
     # Iterate through all combinations
     for d_model, seq_len in itertools.product(d_model_options, seq_len_options):
@@ -156,26 +159,47 @@ def main():
             # Create random inputs
             Q, K, V = create_random_inputs(batch_size, seq_len, d_model, device)
             
-            # Benchmark forward pass
-            forward_time = benchmark_attention_forward(Q, K, V, num_warmup, num_iters)
+            # Benchmark UNCOMPILED version
+            print("  Running uncompiled version...")
+            uncompiled_forward_time = benchmark_attention_forward(
+                scaled_dot_product_attention, Q, K, V, num_warmup, num_iters
+            )
+            uncompiled_backward_time, uncompiled_memory = benchmark_attention_backward(
+                scaled_dot_product_attention, Q, K, V, num_warmup, num_iters
+            )
             
-            # Benchmark backward pass and measure memory
-            backward_time, memory_usage = benchmark_attention_backward(Q, K, V, num_warmup, num_iters)
+            # Benchmark COMPILED version  
+            print("  Running compiled version...")
+            compiled_forward_time = benchmark_attention_forward(
+                compiled_attention, Q, K, V, num_warmup, num_iters
+            )
+            compiled_backward_time, compiled_memory = benchmark_attention_backward(
+                compiled_attention, Q, K, V, num_warmup, num_iters
+            )
+            
+            # Calculate speedups
+            forward_speedup = uncompiled_forward_time / compiled_forward_time if compiled_forward_time > 0 else 0
+            backward_speedup = uncompiled_backward_time / compiled_backward_time if compiled_backward_time > 0 else 0
             
             # Store results
             result = {
                 'd_model': d_model,
                 'seq_len': seq_len,
-                'forward_time_ms': forward_time * 1000,
-                'backward_time_ms': backward_time * 1000,
-                'memory_mb': memory_usage
+                'uncompiled_forward_ms': uncompiled_forward_time * 1000,
+                'compiled_forward_ms': compiled_forward_time * 1000,
+                'forward_speedup': forward_speedup,
+                'uncompiled_backward_ms': uncompiled_backward_time * 1000,
+                'compiled_backward_ms': compiled_backward_time * 1000,
+                'backward_speedup': backward_speedup,
+                'uncompiled_memory_mb': uncompiled_memory,
+                'compiled_memory_mb': compiled_memory
             }
             results.append(result)
             
             # Print results
-            print(f"  Forward time:  {forward_time*1000:.3f} ms")
-            print(f"  Backward time: {backward_time*1000:.3f} ms") 
-            print(f"  Memory usage:  {memory_usage:.2f} MB")
+            print(f"    Uncompiled - Forward: {uncompiled_forward_time*1000:.3f} ms, Backward: {uncompiled_backward_time*1000:.3f} ms")
+            print(f"    Compiled   - Forward: {compiled_forward_time*1000:.3f} ms, Backward: {compiled_backward_time*1000:.3f} ms")
+            print(f"    Speedup    - Forward: {forward_speedup:.2f}x, Backward: {backward_speedup:.2f}x")
             
         except Exception as e:
             print(f"  Error: {str(e)}")
@@ -183,16 +207,29 @@ def main():
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
     
-    # Print summary table
-    print("\n" + "="*80)
-    print("BENCHMARK RESULTS SUMMARY")
-    print("="*80)
-    print(f"{'d_model':<8} {'seq_len':<8} {'Forward (ms)':<12} {'Backward (ms)':<13} {'Memory (MB)':<12}")
-    print("-" * 80)
+    # Print comprehensive comparison table
+    print("\n" + "=" * 120)
+    print("ATTENTION COMPILATION COMPARISON RESULTS")
+    print("=" * 120)
+    print(f"{'Config':<15} {'Uncompiled Forward':<18} {'Compiled Forward':<16} {'Forward':<8} "
+          f"{'Uncompiled Backward':<19} {'Compiled Backward':<17} {'Backward':<8}")
+    print(f"{'(d_model, seq_len)':<15} {'(ms)':<18} {'(ms)':<16} {'Speedup':<8} "
+          f"{'(ms)':<19} {'(ms)':<17} {'Speedup':<8}")
+    print("-" * 120)
     
     for result in results:
-        print(f"{result['d_model']:<8} {result['seq_len']:<8} {result['forward_time_ms']:<12.3f} "
-              f"{result['backward_time_ms']:<13.3f} {result['memory_mb']:<12.2f}")
+        config = f"({result['d_model']}, {result['seq_len']})"
+        print(f"{config:<15} {result['uncompiled_forward_ms']:<18.3f} {result['compiled_forward_ms']:<16.3f} "
+              f"{result['forward_speedup']:<8.2f} {result['uncompiled_backward_ms']:<19.3f} "
+              f"{result['compiled_backward_ms']:<17.3f} {result['backward_speedup']:<8.2f}")
+    
+    # Print summary statistics
+    if results:
+        avg_forward_speedup = sum(r['forward_speedup'] for r in results) / len(results)
+        avg_backward_speedup = sum(r['backward_speedup'] for r in results) / len(results)
+        print(f"\nAverage Speedups:")
+        print(f"  Forward pass:  {avg_forward_speedup:.2f}x")
+        print(f"  Backward pass: {avg_backward_speedup:.2f}x")
 
 
 if __name__ == "__main__":
